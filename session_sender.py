@@ -43,12 +43,30 @@ s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # AF_INET for IPv4 and SOC
 # Set IP TTL to 255 according to https://tools.ietf.org/html/rfc4656#section-4.1.2
 s.setsockopt(socket.IPPROTO_IP, socket.IP_TTL, 255)
 
-# Create Layer4 payload for the TWAMP Unauthenticated Test packet
-MESSAGE = unauthenticated_test_packet(1338)
 
-# Send UDP packet
-s.sendto(MESSAGE, (dest_ip, dest_udp_port) )
+# While loop
+packet_seq = 0
+packet_ipp = 0
+test_sample = 0
+while True:
+    s.setsockopt(socket.IPPROTO_IP, socket.IP_TOS, packet_ipp * 32)  # Set IP ToS Byte
 
+    # Create Layer4 payload for the TWAMP Unauthenticated Test packet
+    MESSAGE = unauthenticated_test_packet(packet_seq)
+
+    # Send UDP packet
+    s.sendto(MESSAGE, (dest_ip, dest_udp_port))
+
+    packet_seq += 1
+    packet_ipp += 1
+    if packet_ipp == 8:
+        test_sample += 1  # Increment after 8 test packets have been sent, with ToS: 0, 32, 64, 96, 128, 160, 192, 224
+        packet_ipp = 0
+
+    time.sleep(1)  # Current thread will sleep for 1 second
+
+    if test_sample == 38:  # Test sample increases every 8 seconds (due to sleep) so this check defines run time.
+        break
 
 s.close()  # Close socket
 sys.exit(0)  # Exit script
