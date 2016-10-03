@@ -22,11 +22,14 @@ def unauthenticated_test_packet(seq):  # https://tools.ietf.org/html/rfc4656#sec
 
     # Payload of the UDP packet is 14 Bytes
     layer_4_payload = sequence_number + timestamp + error_estimate
-    print(binascii.hexlify(layer_4_payload))
+
+    # Uncomment following sentence for debug purposes only
+    print('\nSequence: '+str(seq)+' - Layer 4 payload (in hex): '+binascii.hexlify(layer_4_payload)+'\n')
+
     return layer_4_payload
 
 # IP details of session-REFLECTOR:
-dest_ip = '192.168.1.1'
+dest_ip = '192.168.1.155'
 dest_udp_port = 862  # Well-known port for TWAMP Control (RFC 5357)
 
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # AF_INET for IPv4 and SOCK_DGRAM for UDP
