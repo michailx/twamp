@@ -5,7 +5,9 @@ import time
 import binascii
 
 
-def unauthenticated_test_packet(seq):  # https://tools.ietf.org/html/rfc4656#section-4.1.2
+def unauthenticated_test_packet(seq, padding=1400):  # https://tools.ietf.org/html/rfc4656#section-4.1.2
+    # By default use padding of 1400 Bytes
+
     # Sequence field
     sequence_number = pack('!I', int(seq))  # Used ! for bits alignment "network" (= big-endian)
 
@@ -20,13 +22,17 @@ def unauthenticated_test_packet(seq):  # https://tools.ietf.org/html/rfc4656#sec
     # Error Estimate field
     error_estimate = pack('!H', 32769)  # Binary 1000000000000001 (Decimal 32769)
 
-    # Payload of the UDP packet is 14 Bytes
-    layer_4_payload = sequence_number + timestamp + error_estimate
+    # Packet padding all-zeros, in Bytes
+    packet_padding = padding * pack('!B', 0)
+
+    # Payload of the UDP packet is 14 Bytes plus padding Bytes
+    layer_4_payload = sequence_number + timestamp + error_estimate + packet_padding
 
     # Uncomment following sentence for debug purposes only
     print('\nSequence: '+str(seq)+' - Layer 4 payload (in hex): '+binascii.hexlify(layer_4_payload)+'\n')
 
     return layer_4_payload
+
 
 # IP details of session-REFLECTOR:
 dest_ip = '192.168.1.155'
@@ -38,7 +44,7 @@ s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # AF_INET for IPv4 and SOC
 s.setsockopt(socket.IPPROTO_IP, socket.IP_TTL, 255)
 
 # Create Layer4 payload for the TWAMP Unauthenticated Test packet
-MESSAGE = unauthenticated_test_packet(1337)
+MESSAGE = unauthenticated_test_packet(1338)
 
 # Send UDP packet
 s.sendto(MESSAGE, (dest_ip, dest_udp_port) )
