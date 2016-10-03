@@ -4,9 +4,10 @@ import sys
 import time
 import binascii
 
+
 def unauthenticated_test_packet(seq):  # https://tools.ietf.org/html/rfc4656#section-4.1.2
-    layer_4_payload = 'temp'  # Payload of the UDP packet
-    sequence_number = seq
+    # Sequence field
+    sequence_number = pack('!I', int(seq))  # Used ! for bits alignment "network" (= big-endian)
 
     # Timestamp field
     localtime = time.time() + 2208988800
@@ -14,13 +15,13 @@ def unauthenticated_test_packet(seq):  # https://tools.ietf.org/html/rfc4656#sec
     # https://tools.ietf.org/html/rfc868 > Gives number of seconds between Unix Epoch and 0h Jan 1 1900 (!)
     timestamp_integer_part = int(localtime)
     timestamp_fractional_part = int(str(localtime % 1)[2:11])  # Take 9 decimal places
-    timestamp = pack('>I', timestamp_integer_part) + pack('>I', timestamp_fractional_part)
+    timestamp = pack('!I', timestamp_integer_part) + pack('!I', timestamp_fractional_part)
 
-    print (localtime)
-    print (timestamp_integer_part)
-    print (timestamp_fractional_part)
+    # Error Estimate field
+    error_estimate = pack('!H', 32769)  # Binary 1000000000000001 (Decimal 32769)
 
-    layer_4_payload = timestamp
+    # Payload of the UDP packet is 14 Bytes
+    layer_4_payload = sequence_number + timestamp + error_estimate
     print(binascii.hexlify(layer_4_payload))
     return layer_4_payload
 
@@ -30,8 +31,11 @@ dest_udp_port = 862  # Well-known port for TWAMP Control (RFC 5357)
 
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # AF_INET for IPv4 and SOCK_DGRAM for UDP
 
-# Create Layer4 playload for the TWAMP Unauthenticated Test packet
-MESSAGE = unauthenticated_test_packet(0)
+# Set IP TTL to 255 according to https://tools.ietf.org/html/rfc4656#section-4.1.2
+s.setsockopt(socket.IPPROTO_IP, socket.IP_TTL, 255)
+
+# Create Layer4 payload for the TWAMP Unauthenticated Test packet
+MESSAGE = unauthenticated_test_packet(1337)
 
 # Send UDP packet
 s.sendto(MESSAGE, (dest_ip, dest_udp_port) )
