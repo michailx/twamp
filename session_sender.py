@@ -12,6 +12,24 @@ class Listening(threading.Thread):
         self.sock = sock
         threading.Thread.__init__(self)
 
+    def unauthenticated_response_packet(self, received_data):
+        seq, time_int, time_fract, error_estimate, mbz_1, rcv_time_int, rcv_time_fract, \
+        sender_seq, sender_time_int, sender_time_fract, sender_error, \
+        mbz_2, sender_ttl = unpack('! I I I H H I I I I I H H B', received_data[:41])
+
+        if mbz_1 != 0 or mbz_2 != 0:
+            print('Session-reflector is not setting both MBZ fields to zero.')
+
+        # Return a dictionary. Keys have the same name as fields in https://tools.ietf.org/html/rfc5357#section-4.2.1
+        packet_header = {'Sequence Number': seq, 'Timestamp': float(str(time_int)+'.'+str(time_fract)),
+                         'Error Estimate': error_estimate,
+                         'Receive Timestamp': float(str(rcv_time_int)+'.'+str(rcv_time_fract)),
+                         'Sender Sequence Number': sender_seq,
+                         'Sender Timestamp': float(str(sender_time_int)+'.'+str(sender_time_fract)),
+                         'Sender Error Estimate': sender_error, 'Sender TTL': sender_ttl}
+
+        return packet_header
+
     def run(self):
         while True:
 
@@ -19,10 +37,13 @@ class Listening(threading.Thread):
                 received_data, addr = s.recvfrom(2048)  # Receive buffer size is 2048 bytes
 
                 # Uncomment following sentence for debug purposes only
-                # print('Received from ' + addr[0] + ' the message: ' + str(received_data))
-                print('recvfrom ' + str(addr[0]) + ':' + str(addr[1]) + ' the message (exl padding): ')
+                #print('Recvfrom ' + str(addr[0]) + ':' + str(addr[1]) + ' the message:' + str(received_data))
 
+                header = self.unauthenticated_response_packet(received_data)
 
+                # Uncomment following sentence for debug purposes only
+                #print(sequence_number, timestamp_integer_part, timestamp_fractional_part, error_estimate)
+                print(header)
 
             except socket.timeout:
                 print('I have not received any data for the last 10 seconds. Stopping thread execution...')
@@ -112,4 +133,4 @@ sender.start()
 
 listener.join()  # Main thread must will until the Listening thread is finished
 s.close()
-sys.exit(0)  # Exit script
+#sys.exit(0)  # Exit script
