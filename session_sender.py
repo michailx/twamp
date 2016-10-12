@@ -8,8 +8,10 @@ import threading
 
 class Listening(threading.Thread):
 
-    def __init__(self, sock):
+    def __init__(self, sock, dst_ip, dst_udp_port):
         self.sock = sock
+        self.dest_ip = dst_ip  # Added destination IP and Port in order to filter out unwanted packets.
+        self.dest_udp_port = dst_udp_port
         threading.Thread.__init__(self)
 
     def unauthenticated_response_packet(self, received_data):
@@ -30,23 +32,91 @@ class Listening(threading.Thread):
 
         return packet_header
 
-    def run(self):
-        while True:
+    def aggregate_samples(self, samples_list):
+        packet_loss = 0.0
+        round_trip_delay = 0.0
+        jitter = 0.0
 
+        # Take care of packet reordering in the network
+        samples_sorted = sorted(samples_list, key=lambda item: item[0])
+
+        # len(samples_sorted) is the number of samples during this time window
+        num_of_samples = len(samples_sorted)
+
+        # samples_sorted[-1][0] is the highest Sender Sequence Number received during this time window
+        highest_sender_seq_nbr = samples_sorted[-1][0]
+
+        # samples_sorted[0][0] is the lowest Sender Sequence Number received during this time window
+        lowest_sender_seq_nbr = samples_sorted[0][0]
+
+        # Expected number of received packets during this window:  1 + highest_sender_seq_nbr - lowest_sender_seq_nbr
+        # Calculate Packet loss:
+        packet_loss = 1 - num_of_samples / (1 + highest_sender_seq_nbr - lowest_sender_seq_nbr)
+
+        # Calculate Delay:
+
+        return num_of_samples, packet_loss, round_trip_delay, jitter, highest_sender_seq_nbr, lowest_sender_seq_nbr
+
+    def run(self):
+        samples = []
+        start_time = time.time() + 2208988800
+
+        while True:
             try:
                 received_data, addr = s.recvfrom(2048)  # Receive buffer size is 2048 bytes
 
                 # Uncomment following sentence for debug purposes only
-                #print('Recvfrom ' + str(addr[0]) + ':' + str(addr[1]) + ' the message:' + str(received_data))
+                # print('Recvfrom ' + str(addr[0]) + ':' + str(addr[1]) + ' the message:' + str(received_data))
+
+                if addr[0] != self.dest_ip or addr[1] != self.dest_udp_port:
+                    print('Received packet from unexpected host '+str(addr[0]) + ':' + str(addr[1])+'. Disregard it.')
+                    continue
 
                 header = self.unauthenticated_response_packet(received_data)
 
+                current_time = time.time() + 2208988800
+
+                sample = (header['Sender Sequence Number'], current_time - header['Sender Timestamp'])
+
+                if current_time - start_time >= 15.0:
+                    print(current_time - start_time)
+
+                    num_of_samples, packet_loss, round_trip_delay, jitter, last_sample, first_sample = \
+                        self.aggregate_samples(samples)
+
+                    # Print to terminal:
+                    print('\n------------------------- Last 15 seconds: -------------------------\n' +
+                          format(start_time, '.3f') + ' - ' + format(current_time, '.3f') +
+                          ' | Num of rcv pkts ' + str(num_of_samples) +
+                          ' | First rcv pkt: ' + str(first_sample) + ', Last rcv pkt: ' + str(last_sample) + ' | ' +
+                          ': Packet Loss (%): ' + format(packet_loss*100, '.3f') +
+                          '\n--------------------------------------------------------------------\n')
+
+                    # Clear lists
+                    samples = []
+
+                    # Set new start time
+                    start_time = time.time() + 2208988800
+
+
                 # Uncomment following sentence for debug purposes only
-                #print(sequence_number, timestamp_integer_part, timestamp_fractional_part, error_estimate)
                 print(header)
 
+                samples.append(sample)
+
             except socket.timeout:
-                print('I have not received any data for the last 10 seconds. Stopping thread execution...')
+                print('\nI have not received any data for the last 5 seconds. Stopping thread execution...\n')
+
+                num_of_samples, packet_loss, round_trip_delay, jitter, last_sample, first_sample = \
+                    self.aggregate_samples(samples)
+
+                # Print to terminal:
+                print('\n------------------------- Last 15 seconds: -------------------------\n' +
+                      format(start_time, '.3f') + ' - ' + ' End of test' +
+                      ' | Num of rcv pkts ' + str(num_of_samples) +
+                      ' | First rcv pkt: ' + str(first_sample) + ', Last rcv pkt: ' + str(last_sample) + ' | ' +
+                      ': Packet Loss (%): ' + format(packet_loss * 100, '.3f') +
+                      '\n--------------------------------------------------------------------\n')
                 break
 
 
@@ -100,7 +170,7 @@ class Sending(threading.Thread):
             # Send UDP packet
             self.sock.sendto(msg, (self.dest_ip, self.dest_udp_port))
 
-            time.sleep(1)  # Current thread will sleep for 1 second
+            time.sleep(0.120)  # Current thread will sleep for 100 msec
 
             packet_seq += 1
             packet_ipp += 1
@@ -108,9 +178,8 @@ class Sending(threading.Thread):
                 test_sample += 1  # Increment after 8 test pckts sent, with ToS: 0, 32, 64, 96, 128, 160, 192, 224
                 packet_ipp = 0
 
-            if test_sample == 8:  # Test sample increases every 8 seconds (due to sleep) so this check defines run time
-                # Equals 38 for 5 minutes
-                # Equals 8 for 1 minute
+            if test_sample == 30:  # Test sample increases every 800ms (due to sleep) so this check defines run time
+                # Equals 60 for 1 minute
                 break
 
 
@@ -121,11 +190,11 @@ s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # AF_INET for IPv4 and SOC
 # Set IP TTL to 255 according to https://tools.ietf.org/html/rfc4656#section-4.1.2
 s.setsockopt(socket.IPPROTO_IP, socket.IP_TTL, 255)
 
-s.settimeout(10)  # Set timeout of 10seconds to blocking operations such as recvfrom()
+s.settimeout(5)  # Set timeout of 10seconds to blocking operations such as recvfrom()
 
 s.bind(('192.168.1.38', 862))
 
-listener = Listening(s)
+listener = Listening(s, '192.168.1.155', 862)
 sender = Sending(s, '192.168.1.155', 862)
 
 listener.start()
