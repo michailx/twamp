@@ -63,7 +63,7 @@ class Listening(threading.Thread):
 
         while True:
             try:
-                received_data, addr = s.recvfrom(2048)  # Receive buffer size is 2048 bytes
+                received_data, addr = self.sock.recvfrom(2048)  # Receive buffer size is 2048 bytes
 
                 # Uncomment following sentence for debug purposes only
                 # print('Recvfrom ' + str(addr[0]) + ':' + str(addr[1]) + ' the message:' + str(received_data))
@@ -184,22 +184,26 @@ class Sending(threading.Thread):
 
 
 # -- Main --
+def Main():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # AF_INET for IPv4 and SOCK_DGRAM for UDP
 
-s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # AF_INET for IPv4 and SOCK_DGRAM for UDP
+    # Set IP TTL to 255 according to https://tools.ietf.org/html/rfc4656#section-4.1.2
+    s.setsockopt(socket.IPPROTO_IP, socket.IP_TTL, 255)
 
-# Set IP TTL to 255 according to https://tools.ietf.org/html/rfc4656#section-4.1.2
-s.setsockopt(socket.IPPROTO_IP, socket.IP_TTL, 255)
+    s.settimeout(5)  # Set timeout of 5 seconds to blocking operations such as recvfrom()
 
-s.settimeout(5)  # Set timeout of 5 seconds to blocking operations such as recvfrom()
+    s.bind(('192.168.1.38', 862))
 
-s.bind(('192.168.1.38', 862))
+    listener = Listening(s, '192.168.1.155', 862)
+    sender = Sending(s, '192.168.1.155', 862)
 
-listener = Listening(s, '192.168.1.155', 862)
-sender = Sending(s, '192.168.1.155', 862)
+    listener.start()
+    sender.start()
 
-listener.start()
-sender.start()
+    listener.join()  # Main thread must will until the Listening thread is finished
+    s.close()
 
-listener.join()  # Main thread must will until the Listening thread is finished
-s.close()
-#sys.exit(0)  # Exit script
+if __name__ == '__main__':
+    # session_sender.py is being executed as script
+    Main()
+

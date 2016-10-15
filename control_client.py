@@ -28,7 +28,8 @@ def request_tw_session(session_sender, session_reflector):
     num_of_schedule_slots = pack('!I', 0)  # the Number of Scheduled Slots and Number of Packets MUST be set to 0
     num_of_pkts = pack('!I', 0)
     sender_port = pack('!H', session_sender[1])  # This is the local UDP port at the session-sender (used by TWAMP-Test)
-    receiver_port = pack('!H', session_reflector[1])  # This is the remote UDP port at the session-reflector (used by TWAMP-Test)
+    # Right below is the remote UDP port at the session-reflector (used by TWAMP-Test):
+    receiver_port = pack('!H', session_reflector[1])
     sender_address = pack('!QQ', 0, 0)  # Addresses MAY be 0 in case TWAMP-Test shall use the same as TWAMP-Control did
     receiver_address = pack('!QQ', 0, 0)
     sid = pack('!QQ', 0, 0)  # the SID in the Request-TW-Session message MUST be set to 0
@@ -43,7 +44,7 @@ def request_tw_session(session_sender, session_reflector):
     start_time_fractional_part = int(str(localtime % 1)[2:11])  # Take 9 decimal places
     start_time = pack('!I', start_time_integer_part) + pack('!I', start_time_fractional_part)
 
-    timeout_integer_part = 10  # Session-Reflector will reflect TWAMP-Test packets for 10 seconds after Stop-Sessions
+    timeout_integer_part = 30  # Session-Reflector will reflect TWAMP-Test packets for 10 seconds after Stop-Sessions
     timeout_fractional_part = 0
     timeout = pack('!I', timeout_integer_part) + pack('!I', timeout_fractional_part)
 
@@ -150,6 +151,25 @@ if accept != 0:
           str(accept) + 'instead of zero (0)')
     s.close()
     sys.exit(1)
+else:
+    # --- Start TWAMP Test ---
+    from session_sender import Listening
+    from session_sender import Sending
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # AF_INET for IPv4 and SOCK_DGRAM for UDP
 
+    #  Set IP TTL to 255 according to https://tools.ietf.org/html/rfc4656#section-4.1.2
+    sock.setsockopt(socket.IPPROTO_IP, socket.IP_TTL, 255)
+    sock.settimeout(5)  # Set timeout of 5 seconds to blocking operations such as recvfrom()
+    sock.bind(SESSION_SENDER)
+    # Using classes from file session_sender.py
+    listener = Listening(sock, SESSION_REFLECTOR[0], SESSION_REFLECTOR[1])
+    sender = Sending(sock, SESSION_REFLECTOR[0], SESSION_REFLECTOR[1])
+    listener.start()
+    sender.start()
+    listener.join()  # Main thread must will until the Listening thread is finished
+    sock.close()
+    # --- End of Test ---
+
+# FIXME: I need to add Stop-Sessions msg to TWAMP-Control
 
 s.close()
