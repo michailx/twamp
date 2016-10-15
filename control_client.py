@@ -1,6 +1,7 @@
 import socket
 from struct import *
 import sys
+import time
 
 
 def server_greeting(received_data):
@@ -16,9 +17,47 @@ def set_up_response():
 
 def server_start(received_data):
     accept = int(received_data[15])
-    print(accept)
     return accept
 
+
+def request_tw_session():
+    # https://tools.ietf.org/html/rfc5357#section-3.5
+    #command_number = pack('!?', 1)
+    command_number = bytes([5])  # One Byte with the value of decimal 5
+    ipvn = bytes([4])  # One Byte with value 4 for IPv4; also include the MBZ field
+    conf_sender_receiver = pack('!H', 0)  # Both the Conf-Sender field and Conf-Receiver field MUST be set to 0
+    num_of_schedule_slots = pack('!I', 0)  # the Number of Scheduled Slots and Number of Packets MUST be set to 0
+    num_of_pkts = pack('!I', 0)
+    sender_port = pack('!H', 21337)  # This is the local UDP port at the session-sender (used by TWAMP-Test)
+    receiver_port = pack('!H', 21337)  # This is the remote UDP port at the session-reflector (used by TWAMP-Test)
+    sender_address = pack('!QQ', 0, 0)  # Addresses MAY be 0 in case TWAMP-Test shall use the same as TWAMP-Control did
+    receiver_address = pack('!QQ', 0, 0)
+    sid = pack('!QQ', 0, 0)  # the SID in the Request-TW-Session message MUST be set to 0
+    padding_length = pack('!I', 0)  # TEMP
+
+    # https://docs.python.org/2/library/time.html#time.time > Gives number of seconds since Unix Epoch (0h Jan 1 1970)
+    # https://tools.ietf.org/html/rfc868 > Gives number of seconds between Unix Epoch and 0h Jan 1 1900 (!)
+    localtime = time.time() + 2208988800
+
+    # Start Time -> Time when the TWAMP-Test session is to be started (but not before Start-Sessions command is issued)
+    start_time_integer_part = int(localtime + 10)  # Start in 10 seconds from now
+    start_time_fractional_part = int(str(localtime % 1)[2:11])  # Take 9 decimal places
+    start_time = pack('!I', start_time_integer_part) + pack('!I', start_time_fractional_part)
+
+    timeout_integer_part = 10  # Session-Reflector will reflect TWAMP-Test packets for 10 seconds after Stop-Sessions
+    timeout_fractional_part = 0
+    timeout = pack('!I', timeout_integer_part) + pack('!I', timeout_fractional_part)
+
+    type_p_descriptor = pack('!I', 96)  # Ask Session-Reflector to mark TWAMP-test packets with CS3
+    mbz = pack('!Q', 0)
+
+    hmac = pack('!QQ', 0, 0)  # In open mode, the HMAC fields are unused and have the same semantics as MBZ fields
+
+    msg = command_number + ipvn + conf_sender_receiver + num_of_schedule_slots + num_of_pkts + sender_port
+    msg += receiver_port + sender_address + receiver_address + sid + padding_length + start_time + timeout
+    msg += type_p_descriptor + mbz + hmac
+
+    return msg
 
 # --- Main ---
 
@@ -54,5 +93,9 @@ if accept != 0:
           + 'instead of zero (0)')
     s.close()
     sys.exit(1)
+
+
+request_tw_session_msg = request_tw_session()
+s.send(request_tw_session_msg)
 
 s.close()

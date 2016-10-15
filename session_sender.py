@@ -190,7 +190,7 @@ s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # AF_INET for IPv4 and SOC
 # Set IP TTL to 255 according to https://tools.ietf.org/html/rfc4656#section-4.1.2
 s.setsockopt(socket.IPPROTO_IP, socket.IP_TTL, 255)
 
-s.settimeout(5)  # Set timeout of 10seconds to blocking operations such as recvfrom()
+s.settimeout(5)  # Set timeout of 5 seconds to blocking operations such as recvfrom()
 
 s.bind(('192.168.1.38', 862))
 
