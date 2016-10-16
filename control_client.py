@@ -197,9 +197,11 @@ else:
     # Using classes from file session_sender.py
     listener = Listening(sock, session_reflector[0], session_reflector[1])
     sender = Sending(sock, session_reflector[0], session_reflector[1])
+    listener.setName('TWAMP_TEST_SESSION_SENDER___LISTENING_THREAD')
+    sender.setName('TWAMP_TEST_SESSION_SENDER___SENDING_THREAD')
     listener.start()
     sender.start()
-    listener.join()  # Main thread must will until the Listening thread is finished
+    listener.join()  # This (main) thread must wait until the Listening thread is finished
     sock.close()
     # --- End of Test ---
 

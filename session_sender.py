@@ -60,6 +60,10 @@ class Listening(threading.Thread):
     def run(self):
         samples = []
         start_time = time.time() + 2208988800
+        current_time = start_time  # Initialise variable here so it is visible within the exception block
+
+        print('Time Window (sec) | Total number of rcv pkts | Packet loss (%) | Delay (msec) | Jitter (msec) | '
+              'First rcv SEQ | Last rcv SEQ |')
 
         while True:
             try:
@@ -79,18 +83,14 @@ class Listening(threading.Thread):
                 sample = (header['Sender Sequence Number'], current_time - header['Sender Timestamp'])
 
                 if current_time - start_time >= 15.0:
-                    print(current_time - start_time)
 
                     num_of_samples, packet_loss, round_trip_delay, jitter, last_sample, first_sample = \
                         self.aggregate_samples(samples)
 
                     # Print to terminal:
-                    print('\n------------------------- Last 15 seconds: -------------------------\n' +
-                          format(start_time, '.3f') + ' - ' + format(current_time, '.3f') +
-                          ' | Num of rcv pkts ' + str(num_of_samples) +
-                          ' | First rcv pkt: ' + str(first_sample) + ', Last rcv pkt: ' + str(last_sample) + ' | ' +
-                          ': Packet Loss (%): ' + format(packet_loss*100, '.3f') +
-                          '\n--------------------------------------------------------------------\n')
+                    print(format(current_time - start_time, '.5g') + ' | ' + str(num_of_samples) + ' | ' +
+                          format(packet_loss*100, '.3f') + ' | ' + format(round_trip_delay*1000, '.4g') + ' | ' +
+                          format(jitter*1000, '.4g') + ' | ' + str(first_sample) + ' | ' + str(last_sample) + ' | ')
 
                     # Clear lists
                     samples = []
@@ -98,25 +98,23 @@ class Listening(threading.Thread):
                     # Set new start time
                     start_time = time.time() + 2208988800
 
-
                 # Uncomment following sentence for debug purposes only
-                print(header)
+                #print(header)
 
                 samples.append(sample)
 
             except socket.timeout:
-                print('\nI have not received any data for the last 5 seconds. Stopping thread execution...\n')
-
                 num_of_samples, packet_loss, round_trip_delay, jitter, last_sample, first_sample = \
                     self.aggregate_samples(samples)
 
                 # Print to terminal:
-                print('\n------------------------- Last 15 seconds: -------------------------\n' +
-                      format(start_time, '.3f') + ' - ' + ' End of test' +
-                      ' | Num of rcv pkts ' + str(num_of_samples) +
-                      ' | First rcv pkt: ' + str(first_sample) + ', Last rcv pkt: ' + str(last_sample) + ' | ' +
-                      ': Packet Loss (%): ' + format(packet_loss * 100, '.3f') +
-                      '\n--------------------------------------------------------------------\n')
+                # Here current_time is the "timestamp" of the last received packet
+                print(format(current_time - start_time, '.5g') + ' | ' + str(num_of_samples) + ' | ' +
+                      format(packet_loss * 100, '.3f') + ' | ' + format(round_trip_delay * 1000, '.4g') + ' | ' +
+                      format(jitter * 1000, '.4g') + ' | ' + str(first_sample) + ' | ' + str(last_sample) + ' | ')
+
+                print('\n'+self.getName()+': The tested ended above as I received no data for 5 seconds.\n')
+
                 break
 
 
@@ -178,7 +176,7 @@ class Sending(threading.Thread):
                 test_sample += 1  # Increment after 8 test pckts sent, with ToS: 0, 32, 64, 96, 128, 160, 192, 224
                 packet_ipp = 0
 
-            if test_sample == 30:  # Test sample increases every 800ms (due to sleep) so this check defines run time
+            if test_sample == 60:  # Test sample increases every 800ms (due to sleep) so this check defines run time
                 # Equals 60 for 1 minute
                 break
 
