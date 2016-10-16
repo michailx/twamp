@@ -2,6 +2,7 @@ import socket
 from struct import *
 import sys
 import time
+import ipaddress
 
 
 def server_greeting(received_data):
@@ -64,6 +65,7 @@ def request_tw_session(session_sender, session_reflector):
 
     return msg
 
+
 def accept_session(received_data):
     accept = received_data[0]
     (port, ) = unpack('!H', received_data[2:4])  # Bytes 2 and 3
@@ -93,10 +95,25 @@ def stop_sessions():
 
 
 # --- Main ---
-CONTROL_CLIENT = ('192.168.1.38', 862)
+# Limit the IP block of Servers / Session-Reflectors for security purposes ...
+ALLOWED_SERVER_BLOCK = '192.168.0.0/16'
+allowed_server_block = ipaddress.IPv4Network(ALLOWED_SERVER_BLOCK)
+if len(sys.argv) == 2:
+    print('\nYou have defined the Server / Session-Reflector ', sys.argv[1])
+
+    target_ip = ipaddress.ip_address(sys.argv[1])
+    if target_ip not in allowed_server_block.hosts():
+        print("Unfortunately the IPv4 address that you provided is not within allowed block "
+              + ALLOWED_SERVER_BLOCK + '\n')
+        sys.exit(1)
+else:
+    print('\nThis script requires one (1) command-line argument; the IPv4 address of the Server / Session-Reflector!\n')
+    sys.exit(1)
+
+CONTROL_CLIENT = ('192.168.1.38', 862)  # This is the local host
 SESSION_SENDER = (CONTROL_CLIENT[0], 21337)
-SERVER = ('192.168.1.155', 862)
-SESSION_REFLECTOR = (SERVER[0], 21337)
+server = (str(sys.argv[1]), 862)
+session_reflector = (server[0], 21337)
 
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
@@ -105,13 +122,13 @@ s.setsockopt(socket.IPPROTO_IP, socket.IP_TOS, 96)  # Set IP ToS Byte to 96 (CS3
 s.settimeout(5)  # Set timeout of 5 seconds to blocking operations such as recvfrom()
 
 s.bind(CONTROL_CLIENT)
-s.connect(SERVER)
+s.connect(server)
 
 
 data = s.recv(1024)
 #  https://tools.ietf.org/html/rfc4656#section-3.1
 mode = server_greeting(data)
-print('[TWAMP-Control] Control-Client ', CONTROL_CLIENT, ' received Server Greeting msg from ', SERVER)
+print('[TWAMP-Control] Control-Client ', CONTROL_CLIENT, ' received Server Greeting msg from ', server)
 if mode != 1:
     print('[Server Greeting] This script only supports unauthenicated mode and as such it expected Mode to be 1.')
     print('However, it received mode value' + str(mode) + '.')
@@ -121,12 +138,12 @@ if mode != 1:
 
 set_up_response_msg = set_up_response()
 s.send(set_up_response_msg)
-print('[TWAMP-Control] Control-Client ', CONTROL_CLIENT, ' sent Set-up-Response msg to ', SERVER)
+print('[TWAMP-Control] Control-Client ', CONTROL_CLIENT, ' sent Set-up-Response msg to ', server)
 
 
 data = s.recv(1024)
 accept = server_start(data)
-print('[TWAMP-Control] Control-Client ', CONTROL_CLIENT, ' received Server-Start msg from ', SERVER)
+print('[TWAMP-Control] Control-Client ', CONTROL_CLIENT, ' received Server-Start msg from ', server)
 if accept != 0:
     print('[Server Start] The remote server is not willing to continue communication as the Accept field was ' +
           str(accept) + 'instead of zero (0)')
@@ -134,34 +151,34 @@ if accept != 0:
     sys.exit(1)
 
 
-request_tw_session_msg = request_tw_session(SESSION_SENDER, SESSION_REFLECTOR)
+request_tw_session_msg = request_tw_session(SESSION_SENDER, session_reflector)
 s.send(request_tw_session_msg)
-print('[TWAMP-Control] Control-Client ', CONTROL_CLIENT, ' sent Request-TW-Session msg to ', SERVER)
+print('[TWAMP-Control] Control-Client ', CONTROL_CLIENT, ' sent Request-TW-Session msg to ', server)
 
 
 data = s.recv(1024)
 accept, session_reflector_port = accept_session(data)
-print('[TWAMP-Control] Control-Client ', CONTROL_CLIENT, ' received Accept-Session msg from ', SERVER)
+print('[TWAMP-Control] Control-Client ', CONTROL_CLIENT, ' received Accept-Session msg from ', server)
 if accept != 0:
     print('[Accept Session] The remote server is not willing to continue communication as the Accept field was ' +
           str(accept) + 'instead of zero (0)')
     s.close()
     sys.exit(1)
-elif session_reflector_port != SESSION_REFLECTOR[1]:
+elif session_reflector_port != session_reflector[1]:
     print('[Accept Session] The remote server cannot / will not create a TWAMP-test session on UDP port ' +
-          str(SESSION_REFLECTOR[1]) + ' but instead replied with ' + str(session_reflector_port) + '.\n Stopping ...')
+          str(session_reflector[1]) + ' but instead replied with ' + str(session_reflector_port) + '.\n Stopping ...')
     s.close()
     sys.exit(1)
 
 
 start_sessions_msg = start_sessions()
 s.send(start_sessions_msg)
-print('[TWAMP-Control] Control-Client ', CONTROL_CLIENT, ' sent Start-Sessions msg to ', SERVER)
+print('[TWAMP-Control] Control-Client ', CONTROL_CLIENT, ' sent Start-Sessions msg to ', server)
 
 
 data = s.recv(1024)
 accept = start_ack(data)
-print('[TWAMP-Control] Control-Client ', CONTROL_CLIENT, ' received Start-Ack msg from ', SERVER)
+print('[TWAMP-Control] Control-Client ', CONTROL_CLIENT, ' received Start-Ack msg from ', server)
 if accept != 0:
     print('[Start Ack] The remote server is not willing to continue communication as the Accept field was ' +
           str(accept) + 'instead of zero (0)')
@@ -178,8 +195,8 @@ else:
     sock.settimeout(5)  # Set timeout of 5 seconds to blocking operations such as recvfrom()
     sock.bind(SESSION_SENDER)
     # Using classes from file session_sender.py
-    listener = Listening(sock, SESSION_REFLECTOR[0], SESSION_REFLECTOR[1])
-    sender = Sending(sock, SESSION_REFLECTOR[0], SESSION_REFLECTOR[1])
+    listener = Listening(sock, session_reflector[0], session_reflector[1])
+    sender = Sending(sock, session_reflector[0], session_reflector[1])
     listener.start()
     sender.start()
     listener.join()  # Main thread must will until the Listening thread is finished
@@ -189,6 +206,6 @@ else:
 
 stop_sessions_msg = stop_sessions()
 s.send(stop_sessions_msg)
-print('[TWAMP-Control] Control-Client ', CONTROL_CLIENT, ' sent Stop-Sessions msg to ', SERVER)
+print('[TWAMP-Control] Control-Client ', CONTROL_CLIENT, ' sent Stop-Sessions msg to ', server)
 
 s.close()
