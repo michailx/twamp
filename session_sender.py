@@ -32,7 +32,7 @@ class Listening(threading.Thread):
 
         return packet_header
 
-    def aggregate_samples(self, samples_list):
+    def aggregate_samples(self, samples_list, upper_bound):
         packet_loss = 0.0
         round_trip_delay = 0.0
         jitter = 0.0
@@ -49,21 +49,23 @@ class Listening(threading.Thread):
         # samples_sorted[0][0] is the lowest Sender Sequence Number received during this time window
         lowest_sender_seq_nbr = samples_sorted[0][0]
 
-        # Expected number of received packets during this window:  1 + highest_sender_seq_nbr - lowest_sender_seq_nbr
+        # Expected number of received packets during this window:  1 + upper_bound - lowest_sender_seq_nbr
+        # Uppoer bound is the theoretical highest Sender SEQ number for this aggregation window
         # Calculate Packet loss:
-        packet_loss = 1 - num_of_samples / (1 + highest_sender_seq_nbr - lowest_sender_seq_nbr)
+        packet_loss = 1 - num_of_samples / (1 + upper_bound - lowest_sender_seq_nbr)
 
         # Calculate Delay:
 
-        return num_of_samples, packet_loss, round_trip_delay, jitter, highest_sender_seq_nbr, lowest_sender_seq_nbr
+        return num_of_samples, packet_loss, round_trip_delay, jitter
 
     def run(self):
         samples = []
+        sample = (0, 0)
         start_time = time.time() + 2208988800
-        current_time = start_time  # Initialise variable here so it is visible within the exception block
+        current_time = start_time  # Initialise variable here so it is visible within the exception block. Value will
+        # be overwritten in try block.
 
-        print('Time Window (sec) | Total number of rcv pkts | Packet loss (%) | Delay (msec) | Jitter (msec) | '
-              'First rcv SEQ | Last rcv SEQ |')
+        print('Interval (sec) | Total number of rcv pkts | Packet loss (%) | Delay (msec) | Jitter (msec) |')
 
         while True:
             try:
@@ -83,14 +85,15 @@ class Listening(threading.Thread):
                 sample = (header['Sender Sequence Number'], current_time - header['Sender Timestamp'])
 
                 if current_time - start_time >= 15.0:
-
-                    num_of_samples, packet_loss, round_trip_delay, jitter, last_sample, first_sample = \
-                        self.aggregate_samples(samples)
+                    # I will exclude this newest sample from the aggregation. I will use the previous "sample" as upper
+                    # bound. Maybe I already received it, maybe it was lost in transit. I need it to calc pkt loss.
+                    num_of_samples, packet_loss, round_trip_delay, jitter = \
+                        self.aggregate_samples(samples, sample[0]-1)
 
                     # Print to terminal:
-                    print(format(current_time - start_time, '.5g') + ' | ' + str(num_of_samples) + ' | ' +
-                          format(packet_loss*100, '.3f') + ' | ' + format(round_trip_delay*1000, '.4g') + ' | ' +
-                          format(jitter*1000, '.4g') + ' | ' + str(first_sample) + ' | ' + str(last_sample) + ' | ')
+                    print(format(current_time - start_time, '.4g') + ' | ' + str(num_of_samples) + ' | ' +
+                          format(packet_loss*100, '.4g') + ' | ' + format(round_trip_delay*1000, '.4g') + ' | ' +
+                          format(jitter*1000, '.4g') + ' | ')
 
                     # Clear lists
                     samples = []
@@ -104,14 +107,14 @@ class Listening(threading.Thread):
                 samples.append(sample)
 
             except socket.timeout:
-                num_of_samples, packet_loss, round_trip_delay, jitter, last_sample, first_sample = \
-                    self.aggregate_samples(samples)
+                num_of_samples, packet_loss, round_trip_delay, jitter = \
+                    self.aggregate_samples(samples, sample[0])
 
                 # Print to terminal:
                 # Here current_time is the "timestamp" of the last received packet
                 print(format(current_time - start_time, '.5g') + ' | ' + str(num_of_samples) + ' | ' +
                       format(packet_loss * 100, '.3f') + ' | ' + format(round_trip_delay * 1000, '.4g') + ' | ' +
-                      format(jitter * 1000, '.4g') + ' | ' + str(first_sample) + ' | ' + str(last_sample) + ' | ')
+                      format(jitter * 1000, '.4g') + ' | ')
 
                 print('\n'+self.getName()+': The tested ended above as I received no data for 5 seconds.\n')
 
