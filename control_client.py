@@ -30,10 +30,15 @@ def request_tw_session(session_sender, session_reflector):
     sender_port = pack('!H', session_sender[1])  # This is the local UDP port at the session-sender (used by TWAMP-Test)
     # Right below is the remote UDP port at the session-reflector (used by TWAMP-Test):
     receiver_port = pack('!H', session_reflector[1])
-    sender_address = pack('!QQ', 0, 0)  # Addresses MAY be 0 in case TWAMP-Test shall use the same as TWAMP-Control did
-    receiver_address = pack('!QQ', 0, 0)
+
+    # According to https://tools.ietf.org/html/rfc5357#section-3.5 , I could have set these both to zero (0) since I am
+    # using the same addresses for TWAMP-Test as I did with TWAMP-Control. Unfortunately this did not work with Cisco.
+    # Therefore I just set them again... to be the same as TWAMP-Control.
+    sender_address = bytes([int(x) for x in session_sender[0].split('.')] + [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+    receiver_address = bytes([int(x) for x in session_reflector[0].split('.')] + [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+
     sid = pack('!QQ', 0, 0)  # the SID in the Request-TW-Session message MUST be set to 0
-    padding_length = pack('!I', 0)  # TEMP
+    padding_length = pack('!I', 1372)  # Session-Reflector shall add 1372 Bytes padding to its reponse packet
 
     # https://docs.python.org/2/library/time.html#time.time > Gives number of seconds since Unix Epoch (0h Jan 1 1970)
     # https://tools.ietf.org/html/rfc868 > Gives number of seconds between Unix Epoch and 0h Jan 1 1900 (!)
@@ -66,15 +71,26 @@ def accept_session(received_data):
 
 
 def start_sessions():
-    two = bytes([2])  # One Byte with the value of decimal 2
+    command_number = bytes([2])  # One Byte with the value of decimal 2
     mbz = bytes([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])  # Fifteen Bytes of 0
     hmac = bytes([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])  # Sixteen Bytes of 0
-    return two + mbz + hmac
+    return command_number + mbz + hmac
 
 
 def start_ack(received_data):
     accept = received_data[0]
     return accept
+
+
+def stop_sessions():
+    # https://tools.ietf.org/html/rfc5357#section-3.8
+    command_number = bytes([3])  # One Byte with the value of decimal 2
+    accept = bytes([0])
+    mbz = pack('!H', 0)
+    number_of_sessions = pack('!I', 1)  # I have only started one session
+    mbz_hmac = pack('!QQQ', 0, 0, 0)
+    return command_number + accept + mbz + number_of_sessions + mbz_hmac
+
 
 # --- Main ---
 CONTROL_CLIENT = ('192.168.1.38', 862)
@@ -170,6 +186,9 @@ else:
     sock.close()
     # --- End of Test ---
 
-# FIXME: I need to add Stop-Sessions msg to TWAMP-Control
+
+stop_sessions_msg = stop_sessions()
+s.send(stop_sessions_msg)
+print('[TWAMP-Control] Control-Client ', CONTROL_CLIENT, ' sent Stop-Sessions msg to ', SERVER)
 
 s.close()
