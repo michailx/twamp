@@ -50,7 +50,7 @@ def request_tw_session(session_sender, session_reflector):
     start_time_fractional_part = int(str(localtime % 1)[2:11])  # Take 9 decimal places
     start_time = pack('!I', start_time_integer_part) + pack('!I', start_time_fractional_part)
 
-    timeout_integer_part = 30  # Session-Reflector will reflect TWAMP-Test packets for 10 seconds after Stop-Sessions
+    timeout_integer_part = 10  # Session-Reflector will reflect TWAMP-Test packets for 10 seconds after Stop-Sessions
     timeout_fractional_part = 0
     timeout = pack('!I', timeout_integer_part) + pack('!I', timeout_fractional_part)
 
@@ -98,16 +98,24 @@ def stop_sessions():
 # Limit the IP block of Servers / Session-Reflectors for security purposes ...
 ALLOWED_SERVER_BLOCK = '192.168.0.0/16'
 allowed_server_block = ipaddress.IPv4Network(ALLOWED_SERVER_BLOCK)
-if len(sys.argv) == 2:
-    print('\nYou have defined the Server / Session-Reflector ', sys.argv[1])
+
+if len(sys.argv) == 3:
+    print('\nYou have defined the Server / Session-Reflector ', sys.argv[1], 'and asked for the TWAMP-Test to last ',
+          sys.argv[2], ' minutes.')
 
     target_ip = ipaddress.ip_address(sys.argv[1])
+    test_duration_minutes = int(sys.argv[2])
+
     if target_ip not in allowed_server_block.hosts():
         print("Unfortunately the IPv4 address that you provided is not within allowed block "
               + ALLOWED_SERVER_BLOCK + '\n')
         sys.exit(1)
+    elif test_duration_minutes <= 0:
+        print("Test duration (minutes) has to an integer greater than zero (0). E.g. 1, 2, 3, 4, 5, etc\n")
+        sys.exit(1)
 else:
-    print('\nThis script requires one (1) command-line argument; the IPv4 address of the Server / Session-Reflector!\n')
+    print('\nThis script requires two (2) command-line arguments; the IPv4 address of the Server / Session-Reflector as'
+          ' well as the TWAMP-Test duration (in minutes).\n')
     sys.exit(1)
 
 CONTROL_CLIENT = ('192.168.1.38', 862)  # This is the local host
@@ -118,8 +126,11 @@ session_reflector = (server[0], 21337)
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
 s.setsockopt(socket.IPPROTO_IP, socket.IP_TTL, 255)
-s.setsockopt(socket.IPPROTO_IP, socket.IP_TOS, 96)  # Set IP ToS Byte to 96 (CS3)
-s.settimeout(5)  # Set timeout of 5 seconds to blocking operations such as recvfrom()
+s.setsockopt(socket.IPPROTO_IP, socket.IP_TOS, 96)  # Set IP ToS Byte to 96 (CS3). "The Server SHOULD use the DSCP of
+# the Control-Client's TCP SYN in ALL subsequent packets on that connection as noted in:
+# https://tools.ietf.org/html/rfc5357#section-3.1
+
+s.settimeout(5)  # Set timeout of 5 seconds to blocking operations such as recv()
 
 s.bind(CONTROL_CLIENT)
 s.connect(server)

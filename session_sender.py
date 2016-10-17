@@ -50,7 +50,7 @@ class Listening(threading.Thread):
         lowest_sender_seq_nbr = samples_sorted[0][0]
 
         # Expected number of received packets during this window:  1 + upper_bound - lowest_sender_seq_nbr
-        # Uppoer bound is the theoretical highest Sender SEQ number for this aggregation window
+        # Uppoer bound is the theoretical highest Sender SEQ number for this aggregation "window" (set)
         # Calculate Packet loss:
         packet_loss = 1 - num_of_samples / (1 + upper_bound - lowest_sender_seq_nbr)
 
@@ -85,8 +85,10 @@ class Listening(threading.Thread):
                 sample = (header['Sender Sequence Number'], current_time - header['Sender Timestamp'])
 
                 if current_time - start_time >= 15.0:
-                    # I will exclude this newest sample from the aggregation. I will use the previous "sample" as upper
-                    # bound. Maybe I already received it, maybe it was lost in transit. I need it to calc pkt loss.
+                    # I will exclude this newest sample from the aggregation. I will use the previous theoretical /
+                    # expected "sample" (Sender Seq - 1) as upper bound of the aggregation "window" (set).
+                    # I say "expected" because I might not have received this "sample" (lost in transit).
+                    # But I do need it in order to calculate packet loss.
                     num_of_samples, packet_loss, round_trip_delay, jitter = \
                         self.aggregate_samples(samples, sample[0]-1)
 
@@ -123,10 +125,11 @@ class Listening(threading.Thread):
 
 class Sending(threading.Thread):
 
-    def __init__(self, sock, dst_ip, dst_udp_port):
+    def __init__(self, sock, dst_ip, dst_udp_port, test_duration_mins=1):
         self.sock = sock
         self.dest_ip = dst_ip
         self.dest_udp_port = dst_udp_port
+        self.test_duration_minutes = test_duration_mins
         threading.Thread.__init__(self)
 
     def unauthenticated_test_packet(self, seq, padding=1400):  # https://tools.ietf.org/html/rfc4656#section-4.1.2
@@ -179,8 +182,9 @@ class Sending(threading.Thread):
                 test_sample += 1  # Increment after 8 test pckts sent, with ToS: 0, 32, 64, 96, 128, 160, 192, 224
                 packet_ipp = 0
 
-            if test_sample == 60:  # Test sample increases every 800ms (due to sleep) so this check defines run time
-                # Equals 60 for 1 minute
+            if test_sample == 60 * self.test_duration_minutes:  # Test sample increases every 800ms (due to sleep) so
+                # this if statement defines Test runtime.
+                # Default value (1) equals to 1 minute runtime.
                 break
 
 
@@ -196,7 +200,7 @@ def Main():
     s.bind(('192.168.1.38', 862))
 
     listener = Listening(s, '192.168.1.155', 862)
-    sender = Sending(s, '192.168.1.155', 862)
+    sender = Sending(s, '192.168.1.155', 862, 3)
 
     listener.start()
     sender.start()
