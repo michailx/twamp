@@ -186,6 +186,8 @@ if accept != 0:
     sys.exit(1)
 else:
     # --- Start TWAMP Test ---
+    print('\n[TWAMP-Test] Starting UDP traffic; Session-Sender is', SESSION_SENDER, 'and Session-Reflector is ',
+          session_reflector)
     from session_sender import Listening
     from session_sender import Sending
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # AF_INET for IPv4 and SOCK_DGRAM for UDP
@@ -203,6 +205,7 @@ else:
     sender.start()
     listener.join()  # This (main) thread must wait until the Listening thread is finished
     sock.close()
+    print('[TWAMP-Test] Test has finished.\n')
     # --- End of Test ---
 
 
