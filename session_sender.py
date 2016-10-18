@@ -77,7 +77,7 @@ class Listening(threading.Thread):
             queue_item = packets_sent_queue.get(block=False)
             packets_sent[int(queue_item) % 8] += 1
             if last_sample[0] == queue_item:
-                print(queue_item)
+                #print(queue_item)
                 break
 
         #print(packets_sent)
@@ -108,6 +108,8 @@ class Listening(threading.Thread):
     def run(self):
         sample = (0, 0)
         previous_sample = (0, 0)
+        previous_window_end = 0
+
         start_time = time.time() + 2208988800
         current_time = start_time  # Initialise variable here so it is visible within the exception block. Value will
         # be overwritten in try block.
@@ -120,10 +122,15 @@ class Listening(threading.Thread):
                 # print('Recvfrom ' + str(addr[0]) + ':' + str(addr[1]) + ' the message:' + str(received_data))
 
                 if addr[0] != self.dest_ip or addr[1] != self.dest_udp_port:
-                    print('Received packet from unexpected host '+str(addr[0]) + ':' + str(addr[1])+'. Disregard it.')
+                    print('Received packet from unexpected host ' + str(addr[0]) + ':' + str(addr[1])+'. Disregard it.')
                     continue
 
                 header = self.unauthenticated_response_packet(received_data)
+
+                if header['Sender Sequence Number'] < previous_window_end:
+                    print('Received re-ordered packet with Sender Sequence Number', header['Sender Sequence Number'],
+                          'which I will disregard.')
+                    continue
 
                 current_time = time.time() + 2208988800
 
@@ -138,6 +145,9 @@ class Listening(threading.Thread):
                           'RTD ms:', [format(1000*x, '.4g') for x in round_trip_delay],
                           'Jitter ms:', [format(1000*x, '.4g') for x in jitter]
                           )
+
+                    # Update previous_window_end
+                    previous_window_end = previous_sample[0]
 
                     # Clear lists
                     self.clear_stats()
@@ -159,8 +169,8 @@ class Listening(threading.Thread):
                 # Print to terminal:
                 print(format(current_time - start_time, '.4g'), 'sec >',
                       'Loss %:', [format(100 * x, '.4g') for x in packet_loss],
-                      'RTD ms:', [format(100 * x, '.4g') for x in round_trip_delay],
-                      'Jitter ms:', [format(x, '.4g') for x in jitter]
+                      'RTD ms:', [format(1000 * x, '.4g') for x in round_trip_delay],
+                      'Jitter ms:', [format(1000 * x, '.4g') for x in jitter]
                       )
 
                 print('\n'+self.getName()+': The tested ended above as I received no data for 5 seconds.\n')
