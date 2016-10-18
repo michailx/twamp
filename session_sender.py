@@ -4,9 +4,35 @@ import sys
 import time
 import binascii
 import threading
+from queue import Queue
+from statistics import mean
+from statistics import pvariance
 
+
+packets_sent_queue = Queue()  # Used to "send" information from thread "Sending" to thread "Listening"
+
+
+def to_NTP_format(unix_time):
+
+    # https://docs.python.org/2/library/time.html#time.time > Gives number of seconds since Unix Epoch (0h Jan 1 1970)
+    # https://tools.ietf.org/html/rfc868 > Gives number of seconds between Unix Epoch and 0h Jan 1 1900 (!)
+    localtime = unix_time + 2208988800
+
+    timestamp_integer_part = int(localtime)
+    timestamp_fractional_part = localtime % 1  # FIXME: Take this as float for now. Need to change to NTP format
+
+    # Return Bytes
+    return pack('!I', timestamp_integer_part) + pack('!f', timestamp_fractional_part)
+
+
+def from_NTP_format(timestamp):
+    # FIXME: Treats fractional part as a float, for now. Need to actually implement NTP format...
+    timestamp_integer_part, timestamp_fractional_part = unpack('! I f ', timestamp)
+    return float(timestamp_integer_part) + timestamp_fractional_part
 
 class Listening(threading.Thread):
+
+    samples_table = [[], [], [], [], [], [], [], []]  # Packet RTD ... per IP Precedence value
 
     def __init__(self, sock, dst_ip, dst_udp_port):
         self.sock = sock
@@ -17,7 +43,7 @@ class Listening(threading.Thread):
     def unauthenticated_response_packet(self, received_data):
         seq, time_int, time_fract, error_estimate, mbz_1, rcv_time_int, rcv_time_fract, \
         sender_seq, sender_time_int, sender_time_fract, sender_error, \
-        mbz_2, sender_ttl = unpack('! I I I H H I I I I I H H B', received_data[:41])
+        mbz_2, sender_ttl = unpack('! I I I H H I I I I f H H B', received_data[:41])  # FIXME: sender_time_int as NTP
 
         if mbz_1 != 0 or mbz_2 != 0:
             print('Session-reflector is not setting both MBZ fields to zero.')
@@ -27,45 +53,64 @@ class Listening(threading.Thread):
                          'Error Estimate': error_estimate,
                          'Receive Timestamp': float(str(rcv_time_int)+'.'+str(rcv_time_fract)),
                          'Sender Sequence Number': sender_seq,
-                         'Sender Timestamp': float(str(sender_time_int)+'.'+str(sender_time_fract)),
+                         'Sender Timestamp': float(sender_time_int)+sender_time_fract,
                          'Sender Error Estimate': sender_error, 'Sender TTL': sender_ttl}
 
         return packet_header
 
-    def aggregate_samples(self, samples_list, upper_bound):
-        packet_loss = 0.0
-        round_trip_delay = 0.0
-        jitter = 0.0
+    def handle_sample(self, sample):
+        # sample is a tuple of two integers: (Sender Sequence Number, Round Trip Delay)
 
-        # Take care of packet reordering in the network
-        samples_sorted = sorted(samples_list, key=lambda item: item[0])
+        ip_precedence = sample[0] % 8
+        self.samples_table[ip_precedence].append(sample[1])
 
-        # len(samples_sorted) is the number of samples during this time window
-        num_of_samples = len(samples_sorted)
+    def get_stats(self, last_sample):
+        round_trip_delay = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        jitter = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
-        # samples_sorted[-1][0] is the highest Sender Sequence Number received during this time window
-        highest_sender_seq_nbr = samples_sorted[-1][0]
+        packets_rcved = [0, 0, 0, 0, 0, 0, 0, 0]
+        packets_sent = [0, 0, 0, 0, 0, 0, 0, 0]
+        packet_loss = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
-        # samples_sorted[0][0] is the lowest Sender Sequence Number received during this time window
-        lowest_sender_seq_nbr = samples_sorted[0][0]
+        # Get info about packets_sent by "Sending" thread
+        while not packets_sent_queue.empty():
+            queue_item = packets_sent_queue.get(block=False)
+            packets_sent[int(queue_item) % 8] += 1
+            if last_sample[0] == queue_item:
+                print(queue_item)
+                break
 
-        # Expected number of received packets during this window:  1 + upper_bound - lowest_sender_seq_nbr
-        # Uppoer bound is the theoretical highest Sender SEQ number for this aggregation "window" (set)
-        # Calculate Packet loss:
-        packet_loss = 1 - num_of_samples / (1 + upper_bound - lowest_sender_seq_nbr)
+        #print(packets_sent)
 
-        # Calculate Delay:
+        for samples in enumerate(self.samples_table):  # Enumerate returns tuple (key,value) of the list
+            # Get info about how many packets have been received (samples)
+            packets_rcved[samples[0]] = len(samples[1])
 
-        return num_of_samples, packet_loss, round_trip_delay, jitter
+            # Calculate statistical data: RTD is mean value whereas Jitter is variance
+            round_trip_delay[samples[0]] = mean(samples[1])
+            jitter[samples[0]] = pvariance(samples[1], round_trip_delay[samples[0]])
+
+        #print(packets_rcved)
+
+        for ip_precedence in range(0, 8):  # Loop runs for IP Precedence 0 - 7
+            # Explanation: packet_loss = 1 - num_of_packets_received / num_of_packets_sent
+            if packets_sent[ip_precedence] == 0:
+                print(self.getName() + ': I found no packets in Queue for IP Precedence', ip_precedence,
+                      'which is fishy!')
+                continue
+            packet_loss[ip_precedence] = 1 - packets_rcved[ip_precedence] / packets_sent[ip_precedence]
+
+        return packet_loss, round_trip_delay, jitter
+
+    def clear_stats(self):
+        self.samples_table = [[], [], [], [], [], [], [], []]
 
     def run(self):
-        samples = []
         sample = (0, 0)
+        previous_sample = (0, 0)
         start_time = time.time() + 2208988800
         current_time = start_time  # Initialise variable here so it is visible within the exception block. Value will
         # be overwritten in try block.
-
-        print('Interval (sec) | Total number of rcv pkts | Packet loss (%) | Delay (msec) | Jitter (msec) |')
 
         while True:
             try:
@@ -85,20 +130,17 @@ class Listening(threading.Thread):
                 sample = (header['Sender Sequence Number'], current_time - header['Sender Timestamp'])
 
                 if current_time - start_time >= 15.0:
-                    # I will exclude this newest sample from the aggregation. I will use the previous theoretical /
-                    # expected "sample" (Sender Seq - 1) as upper bound of the aggregation "window" (set).
-                    # I say "expected" because I might not have received this "sample" (lost in transit).
-                    # But I do need it in order to calculate packet loss.
-                    num_of_samples, packet_loss, round_trip_delay, jitter = \
-                        self.aggregate_samples(samples, sample[0]-1)
+                    packet_loss, round_trip_delay, jitter = self.get_stats(previous_sample)
 
                     # Print to terminal:
-                    print(format(current_time - start_time, '.4g') + ' | ' + str(num_of_samples) + ' | ' +
-                          format(packet_loss*100, '.4g') + ' | ' + format(round_trip_delay*1000, '.4g') + ' | ' +
-                          format(jitter*1000, '.4g') + ' | ')
+                    print(format(current_time - start_time, '.4g'), 'sec >',
+                          'Loss %:', [format(100*x, '.4g') for x in packet_loss],
+                          'RTD ms:', [format(1000*x, '.4g') for x in round_trip_delay],
+                          'Jitter ms:', [format(1000*x, '.4g') for x in jitter]
+                          )
 
                     # Clear lists
-                    samples = []
+                    self.clear_stats()
 
                     # Set new start time
                     start_time = time.time() + 2208988800
@@ -106,20 +148,22 @@ class Listening(threading.Thread):
                 # Uncomment following sentence for debug purposes only
                 #print(header)
 
-                samples.append(sample)
+                self.handle_sample(sample)
+                previous_sample = sample
 
             except socket.timeout:
-                num_of_samples, packet_loss, round_trip_delay, jitter = \
-                    self.aggregate_samples(samples, sample[0])
+                packet_loss, round_trip_delay, jitter = self.get_stats(previous_sample)
 
                 # Print to terminal:
                 # Here current_time is the "timestamp" of the last received packet
-                print(format(current_time - start_time, '.5g') + ' | ' + str(num_of_samples) + ' | ' +
-                      format(packet_loss * 100, '.3f') + ' | ' + format(round_trip_delay * 1000, '.4g') + ' | ' +
-                      format(jitter * 1000, '.4g') + ' | ')
+                # Print to terminal:
+                print(format(current_time - start_time, '.4g'), 'sec >',
+                      'Loss %:', [format(100 * x, '.4g') for x in packet_loss],
+                      'RTD ms:', [format(100 * x, '.4g') for x in round_trip_delay],
+                      'Jitter ms:', [format(x, '.4g') for x in jitter]
+                      )
 
                 print('\n'+self.getName()+': The tested ended above as I received no data for 5 seconds.\n')
-
                 break
 
 
@@ -139,12 +183,7 @@ class Sending(threading.Thread):
         sequence_number = pack('!I', int(seq))  # Used ! for bits alignment "network" (= big-endian)
 
         # Timestamp field
-        localtime = time.time() + 2208988800
-        # https://docs.python.org/2/library/time.html#time.time > Gives number of seconds since Unix Epoch (0h Jan 1 1970)
-        # https://tools.ietf.org/html/rfc868 > Gives number of seconds between Unix Epoch and 0h Jan 1 1900 (!)
-        timestamp_integer_part = int(localtime)
-        timestamp_fractional_part = int(str(localtime % 1)[2:11])  # Take 9 decimal places
-        timestamp = pack('!I', timestamp_integer_part) + pack('!I', timestamp_fractional_part)
+        timestamp = to_NTP_format(time.time())
 
         # Error Estimate field
         error_estimate = pack('!H', 32769)  # Binary 1000000000000001 (Decimal 32769)
@@ -174,7 +213,9 @@ class Sending(threading.Thread):
             # Send UDP packet
             self.sock.sendto(msg, (self.dest_ip, self.dest_udp_port))
 
-            time.sleep(0.120)  # Current thread will sleep for 100 msec
+            packets_sent_queue.put(packet_seq, block=False)  # Send this info to "Listening" thread
+
+            time.sleep(0.120)  # Current thread will sleep for 120 msec
 
             packet_seq += 1
             packet_ipp += 1
