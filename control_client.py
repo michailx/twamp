@@ -209,7 +209,7 @@ else:
     sock.bind(SESSION_SENDER)
     # Using classes from file session_sender.py
     listener = Listening(sock, session_reflector[0], session_reflector[1])
-    sender = Sending(sock, session_reflector[0], session_reflector[1])
+    sender = Sending(sock, session_reflector[0], session_reflector[1], test_duration_minutes)
     listener.setName('TWAMP_TEST_SESSION_SENDER___LISTENING_THREAD')
     sender.setName('TWAMP_TEST_SESSION_SENDER___SENDING_THREAD')
     listener.start()
