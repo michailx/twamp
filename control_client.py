@@ -96,7 +96,7 @@ def stop_sessions():
 
 # --- Main ---
 # Limit the IP block of Servers / Session-Reflectors for security purposes ...
-ALLOWED_SERVER_BLOCK = '192.168.0.0/16'
+ALLOWED_SERVER_BLOCK = '192.168.1.0/24'
 allowed_server_block = ipaddress.IPv4Network(ALLOWED_SERVER_BLOCK)
 
 if len(sys.argv) == 3:
@@ -225,3 +225,4 @@ s.send(stop_sessions_msg)
 print('[TWAMP-Control] Control-Client ', CONTROL_CLIENT, ' sent Stop-Sessions msg to ', server)
 
 s.close()
+

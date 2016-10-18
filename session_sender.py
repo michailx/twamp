@@ -1,3 +1,4 @@
+#!/usr/bin/python3
 import socket
 from struct import *
 import sys
@@ -64,23 +65,13 @@ class Listening(threading.Thread):
         ip_precedence = sample[0] % 8
         self.samples_table[ip_precedence].append(sample[1])
 
-    def get_stats(self, last_sample):
+    def get_stats(self, last_sent_sample):
         round_trip_delay = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         jitter = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
         packets_rcved = [0, 0, 0, 0, 0, 0, 0, 0]
         packets_sent = [0, 0, 0, 0, 0, 0, 0, 0]
         packet_loss = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-
-        # Get info about packets_sent by "Sending" thread
-        while not packets_sent_queue.empty():
-            queue_item = packets_sent_queue.get(block=False)
-            packets_sent[int(queue_item) % 8] += 1
-            if last_sample[0] == queue_item:
-                #print(queue_item)
-                break
-
-        #print(packets_sent)
 
         for samples in enumerate(self.samples_table):  # Enumerate returns tuple (key,value) of the list
             # Get info about how many packets have been received (samples)
@@ -91,6 +82,15 @@ class Listening(threading.Thread):
             jitter[samples[0]] = pvariance(samples[1], round_trip_delay[samples[0]])
 
         #print(packets_rcved)
+
+        # Get info about packets_sent by "Sending" thread
+        while not packets_sent_queue.empty():
+            queue_item = packets_sent_queue.get(block=False)
+            packets_sent[int(queue_item) % 8] += 1
+            if last_sent_sample == queue_item:
+                break
+
+        #print(packets_sent)
 
         for ip_precedence in range(0, 8):  # Loop runs for IP Precedence 0 - 7
             # Explanation: packet_loss = 1 - num_of_packets_received / num_of_packets_sent
@@ -107,8 +107,8 @@ class Listening(threading.Thread):
 
     def run(self):
         sample = (0, 0)
-        previous_sample = (0, 0)
-        previous_window_end = 0
+        highest_sample_per_ipp = [0, 0, 0, 0, 0, 0, 0, 0]
+        window_end = 0
 
         start_time = time.time() + 2208988800
         current_time = start_time  # Initialise variable here so it is visible within the exception block. Value will
@@ -127,27 +127,30 @@ class Listening(threading.Thread):
 
                 header = self.unauthenticated_response_packet(received_data)
 
-                if header['Sender Sequence Number'] < previous_window_end:
-                    print('Received re-ordered packet with Sender Sequence Number', header['Sender Sequence Number'],
-                          'which I will disregard.')
+                if header['Sender Sequence Number'] < window_end:
+                    #print('Received re-ordered packet with Sender Sequence Number', header['Sender Sequence Number'],
+                    #      'which I will disregard.')
                     continue
 
                 current_time = time.time() + 2208988800
 
                 sample = (header['Sender Sequence Number'], current_time - header['Sender Timestamp'])
+                self.handle_sample(sample)
 
-                if current_time - start_time >= 15.0:
-                    packet_loss, round_trip_delay, jitter = self.get_stats(previous_sample)
+                if highest_sample_per_ipp[header['Sender Sequence Number'] % 8] < header['Sender Sequence Number']:
+                    highest_sample_per_ipp[header['Sender Sequence Number'] % 8] = header['Sender Sequence Number']
+
+                #if current_time - start_time >= 30.0 and header['Sender Sequence Number'] % 8 == 5:
+                if current_time - start_time >= 30.0:
+                    window_end = max(highest_sample_per_ipp)  # Highest received Sender Seq Nbr regardless IPP
+                    packet_loss, round_trip_delay, jitter = self.get_stats(window_end)
 
                     # Print to terminal:
                     print(format(current_time - start_time, '.4g'), 'sec >',
                           'Loss %:', [format(100*x, '.4g') for x in packet_loss],
                           'RTD ms:', [format(1000*x, '.4g') for x in round_trip_delay],
-                          'Jitter ms:', [format(1000*x, '.4g') for x in jitter]
+                          'Jitter micro sec:', [format(1000000*x, '.4g') for x in jitter]
                           )
-
-                    # Update previous_window_end
-                    previous_window_end = previous_sample[0]
 
                     # Clear lists
                     self.clear_stats()
@@ -158,11 +161,8 @@ class Listening(threading.Thread):
                 # Uncomment following sentence for debug purposes only
                 #print(header)
 
-                self.handle_sample(sample)
-                previous_sample = sample
-
             except socket.timeout:
-                packet_loss, round_trip_delay, jitter = self.get_stats(previous_sample)
+                packet_loss, round_trip_delay, jitter = self.get_stats(sample)
 
                 # Print to terminal:
                 # Here current_time is the "timestamp" of the last received packet
@@ -237,7 +237,6 @@ class Sending(threading.Thread):
                 # this if statement defines Test runtime.
                 # Default value (1) equals to 1 minute runtime.
                 break
-
 
 # -- Main --
 def Main():
