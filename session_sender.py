@@ -7,7 +7,7 @@ import binascii
 import threading
 from queue import Queue
 from statistics import mean
-from statistics import pvariance
+from statistics import pstdev
 
 
 packets_sent_queue = Queue()  # Used to "send" information from thread "Sending" to thread "Listening"
@@ -67,7 +67,7 @@ class Listening(threading.Thread):
 
     def get_stats(self, last_sent_sample):
         round_trip_delay = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-        jitter = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        st_dev = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
         packets_rcved = [0, 0, 0, 0, 0, 0, 0, 0]
         packets_sent = [0, 0, 0, 0, 0, 0, 0, 0]
@@ -77,9 +77,9 @@ class Listening(threading.Thread):
             # Get info about how many packets have been received (samples)
             packets_rcved[samples[0]] = len(samples[1])
 
-            # Calculate statistical data: RTD is mean value whereas Jitter is variance
+            # Calculate statistical data: rtd is mean value whereas st_dev is the standard deviation of rtd
             round_trip_delay[samples[0]] = mean(samples[1])
-            jitter[samples[0]] = pvariance(samples[1], round_trip_delay[samples[0]])
+            st_dev[samples[0]] = pstdev(samples[1], round_trip_delay[samples[0]])
 
         #print(packets_rcved)
 
@@ -100,7 +100,7 @@ class Listening(threading.Thread):
                 continue
             packet_loss[ip_precedence] = 1 - packets_rcved[ip_precedence] / packets_sent[ip_precedence]
 
-        return packet_loss, round_trip_delay, jitter
+        return packet_loss, round_trip_delay, st_dev
 
     def clear_stats(self):
         self.samples_table = [[], [], [], [], [], [], [], []]
@@ -143,13 +143,13 @@ class Listening(threading.Thread):
                 #if current_time - start_time >= 30.0 and header['Sender Sequence Number'] % 8 == 5:
                 if current_time - start_time >= 30.0:
                     window_end = max(highest_sample_per_ipp)  # Highest received Sender Seq Nbr regardless IPP
-                    packet_loss, round_trip_delay, jitter = self.get_stats(window_end)
+                    packet_loss, round_trip_delay, st_dev = self.get_stats(window_end)
 
                     # Print to terminal:
-                    print(format(current_time - start_time, '.4g'), 'sec >',
+                    print(time.strftime("%H:%M:%S", time.gmtime(current_time - 2208988800)), 'UTC >',
                           'Loss %:', [format(100*x, '.4g') for x in packet_loss],
-                          'RTD ms:', [format(1000*x, '.4g') for x in round_trip_delay],
-                          'Jitter micro sec:', [format(1000000*x, '.4g') for x in jitter]
+                          ', RTD ms:', [format(1000*x, '.4g') for x in round_trip_delay],
+                          '> st.dev ms:', [format(1000*x, '.4g') for x in st_dev]
                           )
 
                     # Clear lists
@@ -162,15 +162,15 @@ class Listening(threading.Thread):
                 #print(header)
 
             except socket.timeout:
-                packet_loss, round_trip_delay, jitter = self.get_stats(sample)
+                packet_loss, round_trip_delay, st_dev = self.get_stats(sample)
 
                 # Print to terminal:
                 # Here current_time is the "timestamp" of the last received packet
                 # Print to terminal:
-                print(format(current_time - start_time, '.4g'), 'sec >',
+                print(time.strftime("%H:%M:%S", time.gmtime(current_time - 2208988800)), 'UTC >',
                       'Loss %:', [format(100 * x, '.4g') for x in packet_loss],
-                      'RTD ms:', [format(1000 * x, '.4g') for x in round_trip_delay],
-                      'Jitter ms:', [format(1000 * x, '.4g') for x in jitter]
+                      ', RTD ms:', [format(1000 * x, '.4g') for x in round_trip_delay],
+                      '> st.dev ms:', [format(1000 * x, '.4g') for x in st_dev]
                       )
 
                 print('\n'+self.getName()+': The tested ended above as I received no data for 5 seconds.\n')
