@@ -78,8 +78,12 @@ class Listening(threading.Thread):
             packets_rcved[samples[0]] = len(samples[1])
 
             # Calculate statistical data: rtd is mean value whereas st_dev is the standard deviation of rtd
-            round_trip_delay[samples[0]] = mean(samples[1])
-            st_dev[samples[0]] = pstdev(samples[1], round_trip_delay[samples[0]])
+            if len(samples[1]) == 0:  # This occurs when I don't receive a single packet for this IPP during the window
+                round_trip_delay[samples[0]] = 60.0  # Picked a random value, 60 seconds is super high RTD
+                st_dev[samples[0]] = 0.0
+            else:
+                round_trip_delay[samples[0]] = mean(samples[1])
+                st_dev[samples[0]] = pstdev(samples[1], round_trip_delay[samples[0]])
 
         #print(packets_rcved)
 
